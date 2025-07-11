@@ -1,0 +1,22 @@
+
+###
+
+# dry
+rsync -nPav 'myalcin@141.2.220.253:/data/MEGArchive/data/meg/CTF_Data/pool/*_2024AWM4_*' /media/headmodel/Elements/AWM4/AWM4_data/raw/
+
+# not dry
+rsync -Pav 'myalcin@141.2.220.253:/data/MEGArchive/data/meg/CTF_Data/pool/*_2024AWM4_*' /media/headmodel/Elements/AWM4/AWM4_data/raw/
+
+# check again
+rsync -Pav 'myalcin@141.2.220.253:/data/MEGArchive/data/meg/CTF_Data/pool/*_2024AWM4_*' /media/headmodel/Elements/AWM4/AWM4_data/raw/
+
+
+
+### Noise files for subjects 90 to 99
+rsync -nPav 'myalcin@141.2.220.253:/data/MEGArchive/data/meg/CTF_Data/pool/S1*_Noise_2025*' /media/headmodel/Elements/AWM4/AWM4_data/raw/
+
+# not dry
+rsync -Pav 'myalcin@141.2.220.253:/data/MEGArchive/data/meg/CTF_Data/pool/S1*_Noise_2025*' /media/headmodel/Elements/AWM4/AWM4_data/raw/
+
+# check
+rsync -Pav 'myalcin@141.2.220.253:/data/MEGArchive/data/meg/CTF_Data/pool/S9*_Noise_2025*' /media/headmodel/Elements/AWM4/AWM4_data/raw/
