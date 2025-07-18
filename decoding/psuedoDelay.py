@@ -125,16 +125,16 @@ def plot_grand_average_comparison(grand_avg, timepoints, subjects):
     
     # Plot 1: Maintained Voice comparison across schemes
     ax = axes[0, 0]
-    for scheme in ['avg4', 'avg8', 'avg12']:
-        if grand_avg[scheme]['maintained_voice'] is not None:
-            data = grand_avg[scheme]['maintained_voice']
-            ax.plot(timepoints, data['mean'], 
-                   label=f'{scheme} (n={data["n_subjects"]})',
-                   color=colors[scheme], linewidth=2)
-            ax.fill_between(timepoints, 
-                           data['mean'] - data['sem'],
-                           data['mean'] + data['sem'],
-                           alpha=0.2, color=colors[scheme])
+    scheme = 'avg12'
+    if grand_avg[scheme]['maintained_voice'] is not None:
+        data = grand_avg[scheme]['maintained_voice']
+        ax.plot(timepoints, data['mean'],
+                label=f'Voice (n={data["n_subjects"]})',
+                color=feature_colors['maintained_voice'], linewidth=2)
+        ax.fill_between(timepoints,
+                        data['mean'] - data['sem'],
+                        data['mean'] + data['sem'],
+                        alpha=0.2, color=feature_colors['maintained_voice'])
     
     # Add critical timepoints
     for tp in CRITICAL_TIMEPOINTS:
@@ -145,21 +145,21 @@ def plot_grand_average_comparison(grand_avg, timepoints, subjects):
     ax.set_ylabel('Decoding Accuracy')
     ax.set_title(f'Maintained Voice Identity - Grand Average (N={len(subjects)})')
     ax.legend()
-    ax.set_ylim([0.45, 0.65])
+    ax.set_ylim([0.4, 0.65])
     ax.grid(True, alpha=0.3)
     
     # Plot 2: Maintained Location comparison across schemes
     ax = axes[0, 1]
-    for scheme in ['avg4', 'avg8', 'avg12']:
-        if grand_avg[scheme]['maintained_location'] is not None:
-            data = grand_avg[scheme]['maintained_location']
-            ax.plot(timepoints, data['mean'], 
-                   label=f'{scheme} (n={data["n_subjects"]})',
-                   color=colors[scheme], linewidth=2)
-            ax.fill_between(timepoints, 
-                           data['mean'] - data['sem'],
-                           data['mean'] + data['sem'],
-                           alpha=0.2, color=colors[scheme])
+    scheme = 'avg12'
+    if grand_avg[scheme]['maintained_location'] is not None:
+        data = grand_avg[scheme]['maintained_location']
+        ax.plot(timepoints, data['mean'], 
+                label=f'{scheme} (n={data["n_subjects"]})',
+                color=feature_colors['maintained_location'], linewidth=2)
+        ax.fill_between(timepoints, 
+                        data['mean'] - data['sem'],
+                        data['mean'] + data['sem'],
+                        alpha=0.2, color=feature_colors['maintained_location'])
     
     # Add critical timepoints
     for tp in CRITICAL_TIMEPOINTS:
@@ -170,7 +170,7 @@ def plot_grand_average_comparison(grand_avg, timepoints, subjects):
     ax.set_ylabel('Decoding Accuracy')
     ax.set_title(f'Maintained Location - Grand Average (N={len(subjects)})')
     ax.legend()
-    ax.set_ylim([0.45, 0.65])
+    ax.set_ylim([0.4, 0.65])
     ax.grid(True, alpha=0.3)
     
     # Plot 3: Direct comparison of features for best scheme
@@ -197,7 +197,7 @@ def plot_grand_average_comparison(grand_avg, timepoints, subjects):
     ax.set_ylabel('Decoding Accuracy')
     ax.set_title(f'{best_scheme.upper()} - Feature Comparison (Delay Period)')
     ax.legend()
-    ax.set_ylim([0.45, 0.65])
+    ax.set_ylim([0.4, 0.65])
     ax.grid(True, alpha=0.3)
     
     # Plot 4: Summary statistics
@@ -247,13 +247,13 @@ def plot_time_course_comparison(grand_avg, timepoints):
                 data = grand_avg[scheme][feature]
                 ax.plot(timepoints, data['mean'], 
                        label=f'{scheme}',
-                       color=colors[scheme], linewidth=2)
+                       color=feature_colors[feature], linewidth=2)
                 
                 # Add confidence interval
                 ax.fill_between(timepoints, 
                                data['mean'] - data['sem'] * 1.96,
                                data['mean'] + data['sem'] * 1.96,
-                               alpha=0.15, color=colors[scheme])
+                               alpha=0.15, color=feature_colors[feature])
         
         # Add critical timepoints with labels
         for tp in CRITICAL_TIMEPOINTS:

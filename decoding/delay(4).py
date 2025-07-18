@@ -39,8 +39,8 @@ CORRECTED_DATA = HOME_DIR + '/AWM4_data/raw/correctTriggers/'
 
 # Decoding Parameters - UPDATED TO MATCH ENCODING
 RESAMPLE_FREQ = 100  # Hz
-WINDOW_LENGTH_SEC = 0.1  # 100ms windows (matching encoding)
-WINDOW_STEP_SEC = 0.01  # 10ms steps (matching encoding)
+WINDOW_LENGTH_SEC = 0.1  # 100ms windows 
+WINDOW_STEP_SEC = 0.01  # 10ms steps 
 CV_SPLITS = 5
 CV_REPEATS = 10
 NUM_JOBS = 20  # Number of parallel jobs

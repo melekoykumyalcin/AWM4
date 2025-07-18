@@ -62,10 +62,9 @@ write_log(f"Analysis window: {args.tmin}s to {args.tmax}s")
 write_log(f"Using spatio-temporal approach following Wolff et al.")
 
 # Spatio-temporal parameters
-RESAMPLE_FREQ = 100  # Hz (current data sampling rate)
-SPATIOTEMPORAL_WINDOWS = [100, 400]  # ms - two window lengths to test
-DOWNSAMPLE_TARGET_HZ = 50  # Hz - downsample within windows to this rate
-SPATIOTEMPORAL_STEP = 0.01  # 10ms step to match previous analysis
+SPATIOTEMPORAL_WINDOWS = [100, 400]  # ms - at 100ms, 5 timepoints and at 400ms 20 timepoints 
+TARGET_SAMPLING_RATE = 50  # Hz - 20ms per sample
+SPATIOTEMPORAL_STEP = 0.02  # 20ms step so 1 sample at 50Hz 
 BASELINE_REMOVAL = 'per_trial_per_channel'  #normalizes temporal patterns within each trial/channel
 
 # Important time markers
@@ -131,17 +130,16 @@ def apply_baseline_removal(window_data, method='per_trial_per_channel'):
     else:
         raise ValueError(f"Method {method} not implemented. Use 'per_trial_per_channel'")
 
-def create_spatiotemporal_features(window_data, target_hz=50, current_hz=100):
+def create_spatiotemporal_features(window_data, target_hz=None, current_hz=None):
     """
-    Create spatio-temporal features following the papers' approach:
+    Create spatio-temporal features - simplified version since we're already at 50Hz
     1. Remove trial means per channel
-    2. Downsample within window
-    3. Flatten space×time dimensions
+    2. Flatten space×time dimensions (no downsampling needed!)
     
     Parameters:
-    window_data: array of shape (n_trials, n_channels, n_timepoints)
-    target_hz: target sampling rate within window
-    current_hz: current sampling rate
+    window_data: array of shape (n_trials, n_channels, n_timepoints) already at 50Hz
+    target_hz: ignored (kept for compatibility)
+    current_hz: ignored (kept for compatibility)
     
     Returns:
     X_spatiotemporal: flattened spatio-temporal feature matrix
@@ -149,16 +147,12 @@ def create_spatiotemporal_features(window_data, target_hz=50, current_hz=100):
     # Step 1: Remove baseline per trial per channel (following papers)
     data_demeaned = apply_baseline_removal(window_data, BASELINE_REMOVAL)
     
-    # Step 2: Downsample within window
-    downsample_factor = current_hz // target_hz
-    if downsample_factor > 1:
-        downsampled = data_demeaned[:, :, ::downsample_factor]
-    else:
-        downsampled = data_demeaned
+    # Step 2: No downsampling needed - we're already at 50Hz!
+    # This makes the pipeline much cleaner
     
     # Step 3: Flatten space×time dimensions
-    n_trials, n_channels, n_times = downsampled.shape
-    X_spatiotemporal = downsampled.reshape(n_trials, n_channels * n_times)
+    n_trials, n_channels, n_times = data_demeaned.shape
+    X_spatiotemporal = data_demeaned.reshape(n_trials, n_channels * n_times)
     
     return X_spatiotemporal
 
@@ -292,30 +286,30 @@ def create_pseudo_trials_from_indices(epochs_data, events, trial_indices, corner
 def decode_spatiotemporal_sliding_window(epochs_data, events, sfreq, feature_name, n_iterations, window_length_ms):
     """
     Decode using spatio-temporal approach with sliding windows
-    Following Wolff et al.: extract window → remove means → downsample → flatten → decode
+    Now simplified since we're already at 50Hz!
     """
     write_log(f"\n  Spatio-temporal decoding: {feature_name}")
     write_log(f"  Window length: {window_length_ms}ms")
-    write_log(f"  Downsampling to: {DOWNSAMPLE_TARGET_HZ}Hz within windows")
+    write_log(f"  Data already at target sampling rate: {sfreq}Hz")
     
     # Convert window length to samples
     window_length_sec = window_length_ms / 1000.0
     window_length_samples = int(sfreq * window_length_sec)
     window_step_samples = int(sfreq * SPATIOTEMPORAL_STEP)
     
-    # Calculate number of windows
+    # Calculate number of windows - THIS WAS MISSING!
     n_times = epochs_data.shape[2]
     n_windows = int((n_times - window_length_samples) / window_step_samples) + 1
     
-    # Calculate expected timepoints after downsampling
-    expected_timepoints = int(window_length_ms * DOWNSAMPLE_TARGET_HZ / 1000)
+    # Calculate expected features (much simpler now!)
+    expected_timepoints = int(window_length_ms * sfreq / 1000)
     n_channels = epochs_data.shape[1]
     expected_features = n_channels * expected_timepoints
     
     write_log(f"  Data shape: {epochs_data.shape}")
     write_log(f"  Number of sliding windows: {n_windows}")
-    write_log(f"  Expected timepoints per channel: {expected_timepoints}")
-    write_log(f"  Expected features per window: {expected_features}")
+    write_log(f"  Timepoints per window: {expected_timepoints}")
+    write_log(f"  Features per window: {expected_features}")
     
     # Storage for results across iterations
     iteration_results = []
@@ -324,7 +318,7 @@ def decode_spatiotemporal_sliding_window(epochs_data, events, sfreq, feature_nam
         write_log(f"    Iteration {iteration + 1}/{n_iterations}")
         
         # Results for this iteration
-        window_scores = np.zeros(n_windows)
+        window_scores = np.zeros(n_windows)  # Now n_windows is properly defined
         window_c_values = []
         
         # Process each sliding window
@@ -335,13 +329,9 @@ def decode_spatiotemporal_sliding_window(epochs_data, events, sfreq, feature_nam
             # Extract window data
             window_data = epochs_data[:, :, win_start:win_end]
             
-            # Create spatio-temporal features (following papers)
-            X_spatiotemporal = create_spatiotemporal_features(
-                window_data, 
-                target_hz=DOWNSAMPLE_TARGET_HZ, 
-                current_hz=sfreq
-            )
-            
+            # Create spatio-temporal features (simplified!)
+            X_spatiotemporal = create_spatiotemporal_features(window_data)
+                        
             # Outer cross-validation
             outer_cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=None)
             outer_scores = []
@@ -563,7 +553,7 @@ def load_subject_data(subject, meta_info):
         
         # Select ONLY magnetometers and resample
         mag_epochs = delay_epochs.copy().pick_types(meg='mag')
-        mag_epochs = mag_epochs.resample(RESAMPLE_FREQ, npad='auto')
+        mag_epochs = mag_epochs.resample(TARGET_SAMPLING_RATE, npad='auto')
         
         # Get data
         epochs_data = mag_epochs.get_data(copy=False)
@@ -674,9 +664,14 @@ def main():
         write_log("Failed to load data. Exiting.")
         sys.exit(1)
     
-    write_log("\n=== Spatio-Temporal Analysis ===")
+    # Verify we got the expected sampling rate
+    write_log(f"Loaded data sampling rate: {sfreq}Hz (expected: {TARGET_SAMPLING_RATE}Hz)")
+    if abs(sfreq - TARGET_SAMPLING_RATE) > 0.1:
+        write_log(f"WARNING: Sampling rate mismatch!")
+    
+    write_log("\n=== Spatio-Temporal Analysis (Direct 50Hz Resampling) ===")
     write_log(f"=== Window lengths: {SPATIOTEMPORAL_WINDOWS}ms ===")
-    write_log(f"=== Downsampling to: {DOWNSAMPLE_TARGET_HZ}Hz within windows ===")
+    write_log(f"=== Already at target rate: {TARGET_SAMPLING_RATE}Hz (no further downsampling needed) ===")
     write_log(f"=== Baseline removal: {BASELINE_REMOVAL} ===")
     
     # Results storage for all window lengths
@@ -688,8 +683,8 @@ def main():
         write_log(f"Processing spatio-temporal window: {window_length_ms}ms")
         write_log(f"{'='*60}")
         
-        # Calculate expected features
-        timepoints_per_channel = int(window_length_ms * DOWNSAMPLE_TARGET_HZ / 1000)
+        # Calculate expected features (updated calculation)
+        timepoints_per_channel = int(window_length_ms * TARGET_SAMPLING_RATE / 1000)
         n_channels = epochs_data.shape[1]
         expected_features = n_channels * timepoints_per_channel
         write_log(f"Expected features: {n_channels} channels × {timepoints_per_channel} timepoints = {expected_features}")
@@ -749,7 +744,6 @@ def main():
         'analysis_window': f"{ANALYSIS_CONFIG['tmin']}-{ANALYSIS_CONFIG['tmax']}s",
         'features': ['maintained_voice', 'maintained_location'],
         'spatiotemporal_windows_ms': SPATIOTEMPORAL_WINDOWS,
-        'downsample_target_hz': DOWNSAMPLE_TARGET_HZ,
         'window_step_ms': SPATIOTEMPORAL_STEP * 1000,
         'baseline_removal': BASELINE_REMOVAL,
         'averaging_scheme': AVERAGING_SCHEME,

@@ -1,10 +1,12 @@
 #!/usr/bin/env python
 """
-Extreme Contrast Decoding Script
-Decodes Sp1 vs Sp4 (voice) and L1 vs L4 (location) using 100ms windows
-Uses pseudo-trial averaging (12 trials per pseudo-trial)
+Comprehensive Decoding Analysis Script
+Compares three pseudo-trial approaches:
+1. Extreme Contrast: Sp1 vs Sp4, L1 vs L4
+2. Feature-Pure: Ignoring orthogonal dimension
+3. Condition-Specific: Maintaining all 16 conditions
 
-Usage: python extreme_contrast_decoding.py --subject 23
+Usage: python comprehensive_decoding_analysis.py --subject 23
 """
 
 import os
@@ -27,7 +29,7 @@ import json
 from datetime import datetime
 
 # Parse command line arguments
-parser = argparse.ArgumentParser(description='Run extreme contrast decoding (Sp1 vs Sp4, L1 vs L4)')
+parser = argparse.ArgumentParser(description='Run comprehensive decoding analysis with three approaches')
 parser.add_argument('--subject', type=int, required=True, help='Subject ID')
 parser.add_argument('--n_iterations', type=int, default=10, help='Number of iterations')
 parser.add_argument('--n_jobs', type=int, default=20, help='Number of parallel jobs')
@@ -41,7 +43,7 @@ CORRECTED_DATA = HOME_DIR + '/AWM4_data/raw/correctTriggers/'
 PROCESSED_DIR = HOME_DIR + '/AWM4_data/processed/'
 
 # Create output directory
-OUTPUT_DIR = PROCESSED_DIR + f'extremeContrastAnalysis/subject_{args.subject}/'
+OUTPUT_DIR = PROCESSED_DIR + f'extremesDecoding/subject_{args.subject}/'
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Log file path
@@ -53,9 +55,9 @@ def write_log(message):
         f.write(message + '\n')
 
 # Initialize log
-write_log(f"Extreme contrast decoding started at: {datetime.now()}")
+write_log(f"Comprehensive decoding analysis started at: {datetime.now()}")
 write_log(f"Subject: {args.subject}")
-write_log(f"Decoding: Sp1 vs Sp4 (voice), L1 vs L4 (location)")
+write_log(f"Three approaches: Extreme Contrast, Feature-Pure, Condition-Specific")
 write_log(f"Window length: 100ms, Step: 10ms")
 
 # Decoding parameters
@@ -63,25 +65,12 @@ RESAMPLE_FREQ = 100  # Hz
 WINDOW_LENGTH_SEC = 0.1  # 100ms fixed
 WINDOW_STEP_SEC = 0.01  # 10ms
 
-# Define ping periods
-PING_PERIODS = {
-    'pre_ping': {
-        'tmin': 2.5,  # 500ms after cue
-        'tmax': 3.5,  # until ping
-        'description': 'Pre-ping (maintenance period)'
-    },
-    'post_ping': {
-        'tmin': 3.5,  # after ping
-        'tmax': 4.5,  # end of trial
-        'description': 'Post-ping (retrieval/comparison period)'
-    }
-}
-
 # Delay Period Configuration for data loading
 DELAY_CONFIG = {
     'tmin': 2.0,
     'tmax': 4.7,
-    'timepoints': np.linspace(2.0, 4.7, int((4.7-2.0)*RESAMPLE_FREQ))
+    'timepoints': np.linspace(2.0, 4.7, int((4.7-2.0)*RESAMPLE_FREQ)),
+    'description': 'full delay period'
 }
 
 # Event dictionary
@@ -97,7 +86,7 @@ EVENT_DICT = {
     'Cue_S1': 101, 'Cue_S2': 201
 }
 
-# Define extreme groupings
+# Define extreme groupings for Approach 1
 EXTREME_GROUPINGS = {
     'voice_extreme': {
         'Sp1_only': [111, 112, 113, 114, 211, 212, 213, 214],  # All Sp1 trials
@@ -111,9 +100,27 @@ EXTREME_GROUPINGS = {
     }
 }
 
-# Averaging parameters 
-# For extreme contrasts: 6 trials per condition × 2 conditions = 12 total
-AVERAGING_SCHEME = {'trials_per_condition': 6, 'total_trials': 12}
+# Define feature-pure groupings for Approach 2
+FEATURE_PURE_GROUPINGS = {
+    'voice_pure': {
+        'groups': {
+            'Sp1': [111, 112, 113, 114, 211, 212, 213, 214],
+            'Sp2': [121, 122, 123, 124, 221, 222, 223, 224],
+            'Sp3': [131, 132, 133, 134, 231, 232, 233, 234],
+            'Sp4': [141, 142, 143, 144, 241, 242, 243, 244]
+        },
+        'labels': {'Sp1': 0, 'Sp2': 0, 'Sp3': 1, 'Sp4': 1}
+    },
+    'location_pure': {
+        'groups': {
+            'L1': [111, 121, 131, 141, 211, 221, 231, 241],
+            'L2': [112, 122, 132, 142, 212, 222, 232, 242],
+            'L3': [113, 123, 133, 143, 213, 223, 233, 243],
+            'L4': [114, 124, 134, 144, 214, 224, 234, 244]
+        },
+        'labels': {'L1': 0, 'L2': 0, 'L3': 1, 'L4': 1}
+    }
+}
 
 # Conservative CV parameters
 NUM_JOBS = args.n_jobs
@@ -193,7 +200,7 @@ def extract_maintained_information(subject, metaInfo):
         return None, None
 
 def load_subject_data(subject, meta_info):
-    """Load and preprocess data for extreme contrast analysis"""
+    """Load and preprocess data for comprehensive analysis"""
     write_log(f"\nLoading data for subject {subject}...")
     
     try:
@@ -217,6 +224,11 @@ def load_subject_data(subject, meta_info):
             if drop_idx < len(clean_trials):
                 clean_trials.drop(drop_idx)
                 memorized = np.delete(memorized, drop_idx)
+
+        if subject == 28:
+            drop_idx = 63
+            if drop_idx < len(clean_trials):
+                clean_trials.drop(drop_idx)
         
         # Check for jump artifacts
         jname = f"{PROCESSED_DIR}/ICAs/Jumps{subject}.npy"
@@ -249,16 +261,6 @@ def load_subject_data(subject, meta_info):
         write_log(f"Data loaded successfully. Shape: {epochs_data.shape}")
         write_log(f"Maintained events: {len(maintained_events)}")
         
-        # Log distribution for extreme contrasts
-        sp1_count = sum(1 for v in maintained_events if v in EXTREME_GROUPINGS['voice_extreme']['Sp1_only'])
-        sp4_count = sum(1 for v in maintained_events if v in EXTREME_GROUPINGS['voice_extreme']['Sp4_only'])
-        l1_count = sum(1 for v in maintained_events if v in EXTREME_GROUPINGS['location_extreme']['L1_only'])
-        l4_count = sum(1 for v in maintained_events if v in EXTREME_GROUPINGS['location_extreme']['L4_only'])
-        
-        write_log(f"Extreme contrast distribution:")
-        write_log(f"  Sp1: {sp1_count}, Sp4: {sp4_count}")
-        write_log(f"  L1: {l1_count}, L4: {l4_count}")
-        
         return epochs_data, maintained_events, mag_epochs.info['sfreq']
         
     except Exception as e:
@@ -267,8 +269,8 @@ def load_subject_data(subject, meta_info):
         write_log(traceback.format_exc())
         return None, None, None
 
-def create_pseudo_trials_extreme(data, labels, n_trials_per_pseudo):
-    """Create pseudo-trials by averaging n_trials_per_pseudo trials from same class"""
+def create_pseudo_trials_extreme(data, labels, n_trials_per_pseudo=6):
+    """Create pseudo-trials for extreme contrast (Approach 1)"""
     pseudo_trials = []
     pseudo_labels = []
     
@@ -297,21 +299,78 @@ def create_pseudo_trials_extreme(data, labels, n_trials_per_pseudo):
     else:
         return None, None
 
-def decode_extreme_period(epochs_data, events, sfreq, period_config, comparison_name, groupings, n_iterations):
+def create_feature_pure_pseudo_trials(data, events, feature='voice'):
     """
-    Decode extreme contrasts for a specific period using 100ms sliding windows
+    Simplified feature-pure pseudo-trial creation
     """
-    write_log(f"\n  Decoding {comparison_name} in {period_config['description']}")
-    write_log(f"  Time window: {period_config['tmin']}s to {period_config['tmax']}s")
+    if feature == 'voice':
+        # Group by speaker: Sp1,2 vs Sp3,4
+        low_conditions = [111, 112, 113, 114, 121, 122, 123, 124,  # Sp1, Sp2
+                         211, 212, 213, 214, 221, 222, 223, 224]
+        high_conditions = [131, 132, 133, 134, 141, 142, 143, 144,  # Sp3, Sp4
+                          231, 232, 233, 234, 241, 242, 243, 244]
+    else:  # location
+        # Group by location: L1,2 vs L3,4
+        low_conditions = [111, 112, 121, 122, 131, 132, 141, 142,  # L1, L2
+                         211, 212, 221, 222, 231, 232, 241, 242]
+        high_conditions = [113, 114, 123, 124, 133, 134, 143, 144,  # L3, L4
+                          213, 214, 223, 224, 233, 234, 243, 244]
     
-    # Calculate time window samples
-    period_start_sample = int((period_config['tmin'] - DELAY_CONFIG['tmin']) * sfreq)
-    period_end_sample = int((period_config['tmax'] - DELAY_CONFIG['tmin']) * sfreq)
+    # Create labels
+    labels = []
+    for event in events:
+        if event in low_conditions:
+            labels.append(0)
+        elif event in high_conditions:
+            labels.append(1)
+        else:
+            labels.append(-1)  # Invalid
     
-    # Extract period data
-    period_data = epochs_data[:, :, period_start_sample:period_end_sample]
+    # Filter valid trials
+    valid_indices = np.array(labels) != -1
+    if np.sum(valid_indices) < 12:
+        return None, None
     
-    write_log(f"  Period data shape: {period_data.shape}")
+    filtered_data = data[valid_indices]
+    filtered_labels = np.array(labels)[valid_indices]
+    
+    # Create pseudo-trials
+    return create_pseudo_trials_extreme(filtered_data, filtered_labels, n_trials_per_pseudo=3)
+
+def create_condition_specific_pseudo_trials(data, events, feature='voice'):
+    """
+    Simplified condition-specific pseudo-trial creation
+    """
+    # Create labels based on feature
+    labels = []
+    for event in events:
+        if event >= 111 and event <= 244:  # Valid event codes
+            if feature == 'voice':
+                speaker = (event // 10) % 10  # Extract speaker (1-4)
+                labels.append(0 if speaker <= 2 else 1)  # Sp1,2 vs Sp3,4
+            else:  # location
+                location = event % 10  # Extract location (1-4)
+                labels.append(0 if location <= 2 else 1)  # L1,2 vs L3,4
+        else:
+            labels.append(-1)  # Invalid
+    
+    # Filter valid trials
+    valid_indices = np.array(labels) != -1
+    if np.sum(valid_indices) < 12:
+        return None, None
+    
+    filtered_data = data[valid_indices]
+    filtered_labels = np.array(labels)[valid_indices]
+    
+    # Create pseudo-trials
+    return create_pseudo_trials_extreme(filtered_data, filtered_labels, n_trials_per_pseudo=3)
+
+def decode_sliding_window_fixed(period_data, events, sfreq, period_config, approach_name, 
+                               feature_name, n_iterations, pseudo_trial_params):
+    """
+    Fixed sliding window decoding - clean and simple approach
+    """
+    write_log(f"\n  {approach_name} - {feature_name} in {period_config['description']}")
     
     # Sliding window parameters
     window_length = int(sfreq * WINDOW_LENGTH_SEC)
@@ -319,148 +378,80 @@ def decode_extreme_period(epochs_data, events, sfreq, period_config, comparison_
     n_times = period_data.shape[2]
     n_windows = int((n_times - window_length) / window_step) + 1
     
-    write_log(f"  Number of sliding windows: {n_windows}")
-    
-    # Get groupings
-    if comparison_name == 'voice_extreme':
-        group1_conditions = groupings['Sp1_only']
-        group2_conditions = groupings['Sp4_only']
-    else:  # location_extreme
-        group1_conditions = groupings['L1_only']
-        group2_conditions = groupings['L4_only']
-    
-    # Filter data to only include relevant trials
-    valid_indices = []
-    labels = []
-    
-    for idx, event in enumerate(events):
-        if event in group1_conditions:
-            valid_indices.append(idx)
-            labels.append(0)
-        elif event in group2_conditions:
-            valid_indices.append(idx)
-            labels.append(1)
-    
-    if len(valid_indices) < 20:  # Need reasonable number of trials
-        write_log(f"  Not enough trials for {comparison_name}: {len(valid_indices)}")
-        return None
-    
-    # Filter data
-    filtered_data = period_data[valid_indices]
-    filtered_labels = np.array(labels)
-    
-    write_log(f"  Using {len(valid_indices)} trials: {sum(filtered_labels==0)} class 0, {sum(filtered_labels==1)} class 1")
-    
     # Storage for results across iterations
-    iteration_results = []
+    all_scores = []
     
     for iteration in range(n_iterations):
-        write_log(f"    Iteration {iteration + 1}/{n_iterations}")
-        
-        # Results for this iteration
-        window_scores = np.zeros(n_windows)
-        window_c_values = []
+        window_scores = []
         
         # Process each sliding window
-        for window_idx in tqdm(range(n_windows), desc=f"{comparison_name} iter {iteration+1}"):
+        for window_idx in tqdm(range(n_windows), desc=f"{approach_name} {feature_name} iter {iteration+1}", 
+                              disable=True):
             win_start = window_idx * window_step
             win_end = win_start + window_length
             
             # Extract window data and flatten
-            window_data = filtered_data[:, :, win_start:win_end]
+            window_data = period_data[:, :, win_start:win_end]
             n_trials, n_channels, n_times_win = window_data.shape
             flattened_data = window_data.reshape(n_trials, n_channels * n_times_win)
             
-            # Outer cross-validation
-            outer_cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=None)
-            outer_scores = []
-            best_cs = []
+            # Create pseudo-trials and labels based on approach
+            if approach_name == "Extreme Contrast":
+                # For extreme contrast, we already have filtered data and simple labels
+                valid_indices = pseudo_trial_params['valid_indices']
+                labels = pseudo_trial_params['labels']
+                
+                filtered_data = flattened_data[valid_indices]
+                filtered_labels = np.array(labels)
+                
+                # Create pseudo-trials
+                pseudo_data, pseudo_labels = create_pseudo_trials_extreme(
+                    filtered_data, filtered_labels, n_trials_per_pseudo=6
+                )
+                
+            elif approach_name == "Feature-Pure":
+                # For feature-pure, create pseudo-trials ignoring orthogonal dimension
+                pseudo_data, pseudo_labels = create_feature_pure_pseudo_trials(
+                    flattened_data, events, pseudo_trial_params['feature']
+                )
+                
+            elif approach_name == "Condition-Specific":
+                # For condition-specific, create pseudo-trials within each condition
+                pseudo_data, pseudo_labels = create_condition_specific_pseudo_trials(
+                    flattened_data, events, pseudo_trial_params['feature']
+                )
             
-            # Outer CV loop
-            for train_idx, test_idx in outer_cv.split(flattened_data, filtered_labels):
-                
-                # Create pseudo-trials for train and test separately
-                train_pseudo_data, train_pseudo_labels = create_pseudo_trials_extreme(
-                    flattened_data[train_idx], 
-                    filtered_labels[train_idx],
-                    AVERAGING_SCHEME['trials_per_condition']
-                )
-                
-                test_pseudo_data, test_pseudo_labels = create_pseudo_trials_extreme(
-                    flattened_data[test_idx], 
-                    filtered_labels[test_idx],
-                    AVERAGING_SCHEME['trials_per_condition']
-                )
-                
-                # Skip if not enough pseudo-trials
-                if (train_pseudo_data is None or test_pseudo_data is None or
-                    len(train_pseudo_data) < 4 or len(test_pseudo_data) < 2 or
-                    len(np.unique(train_pseudo_labels)) < 2 or len(np.unique(test_pseudo_labels)) < 2):
-                    continue
-                
-                # Inner CV for hyperparameter selection
-                best_score = -1
-                best_c = 1.0
-                
-                inner_cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=None)
-                
-                for c_value in PARAM_GRID:
-                    clf = make_pipeline(
-                        StandardScaler(),
-                        SVC(kernel='linear', C=c_value, probability=True)
-                    )
-                    
-                    try:
-                        inner_scores = cross_val_score(
-                            clf, train_pseudo_data, train_pseudo_labels, 
-                            cv=inner_cv, 
-                            scoring='accuracy',
-                            n_jobs=1
-                        )
-                        mean_inner_score = np.mean(inner_scores)
-                        
-                        if mean_inner_score > best_score:
-                            best_score = mean_inner_score
-                            best_c = c_value
-                    except:
-                        continue
-                
-                # Train final model
-                final_clf = make_pipeline(
-                    StandardScaler(),
-                    SVC(kernel='linear', C=best_c, probability=True)
-                )
-                
-                try:
-                    final_clf.fit(train_pseudo_data, train_pseudo_labels)
-                    test_score = final_clf.score(test_pseudo_data, test_pseudo_labels)
-                    outer_scores.append(test_score)
-                    best_cs.append(best_c)
-                except:
-                    continue
+            # Check if we have valid data
+            if (pseudo_data is None or len(pseudo_data) < 6 or 
+                len(np.unique(pseudo_labels)) < 2):
+                window_scores.append(0.5)
+                continue
             
-            # Store results for this window
-            if outer_scores:
-                window_scores[window_idx] = np.mean(outer_scores)
-                c_counter = Counter(best_cs)
-                most_common_c = c_counter.most_common(1)[0][0] if best_cs else 1.0
-                window_c_values.append(most_common_c)
-            else:
-                window_scores[window_idx] = 0.5
-                window_c_values.append(1.0)
+            # Simple cross-validation on pseudo-trials
+            cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=None)
+            
+            # Create classifier
+            clf = make_pipeline(
+                StandardScaler(),
+                SVC(kernel='linear', C=1.0, probability=True)
+            )
+            
+            try:
+                # Cross-validate directly on pseudo-trials
+                cv_scores = cross_val_score(clf, pseudo_data, pseudo_labels, 
+                                          cv=cv, scoring='accuracy', n_jobs=1)
+                window_scores.append(np.mean(cv_scores))
+            except:
+                window_scores.append(0.5)
         
-        # Store iteration results
-        iteration_results.append({
-            'scores': window_scores,
-            'c_values': window_c_values
-        })
+        all_scores.append(window_scores)
     
-    # Aggregate results across iterations
-    all_scores = np.array([r['scores'] for r in iteration_results])
+    # Aggregate results
+    all_scores = np.array(all_scores)
     mean_scores = np.mean(all_scores, axis=0)
     std_scores = np.std(all_scores, axis=0)
     
-    # Create time points (absolute time)
+    # Create time points
     timepoints = np.array([period_config['tmin'] + i * WINDOW_STEP_SEC 
                           for i in range(n_windows)])
     
@@ -473,10 +464,124 @@ def decode_extreme_period(epochs_data, events, sfreq, period_config, comparison_
         'std_scores': std_scores,
         'timepoints': timepoints,
         'all_scores': all_scores,
-        'iteration_results': iteration_results,
-        'groupings': groupings,
-        'comparison_name': comparison_name
+        'approach': approach_name,
+        'feature': feature_name
     }
+
+def run_extreme_contrast_decoding(epochs_data, events, sfreq, period_config, n_iterations):
+    """Fixed extreme contrast decoding"""
+    write_log(f"\n--- Approach 1: Extreme Contrast Decoding ---")
+    
+    results = {}
+    
+    for comparison_name, groupings in EXTREME_GROUPINGS.items():
+        # Get groupings
+        if comparison_name == 'voice_extreme':
+            group1_conditions = groupings['Sp1_only']
+            group2_conditions = groupings['Sp4_only']
+        else:  # location_extreme
+            group1_conditions = groupings['L1_only']
+            group2_conditions = groupings['L4_only']
+        
+        # Filter data to only include relevant trials
+        valid_indices = []
+        labels = []
+        
+        for idx, event in enumerate(events):
+            if event in group1_conditions:
+                valid_indices.append(idx)
+                labels.append(0)
+            elif event in group2_conditions:
+                valid_indices.append(idx)
+                labels.append(1)
+        
+        if len(valid_indices) < 20:
+            write_log(f"  Not enough trials for {comparison_name}: {len(valid_indices)}")
+            continue
+        
+        # Extract period data
+        period_start_sample = int((period_config['tmin'] - DELAY_CONFIG['tmin']) * sfreq)
+        period_end_sample = int((period_config['tmax'] - DELAY_CONFIG['tmin']) * sfreq)
+        period_data = epochs_data[:, :, period_start_sample:period_end_sample]
+        
+        # Prepare parameters for the decoding function
+        pseudo_trial_params = {
+            'valid_indices': valid_indices,
+            'labels': labels
+        }
+        
+        # Run decoding
+        result = decode_sliding_window_fixed(
+            period_data, events, sfreq, period_config,
+            "Extreme Contrast", comparison_name, n_iterations,
+            pseudo_trial_params
+        )
+        
+        results[comparison_name] = result
+    
+    return results
+
+def run_feature_pure_decoding(epochs_data, events, sfreq, period_config, n_iterations):
+    """Fixed feature-pure decoding"""
+    write_log(f"\n--- Approach 2: Feature-Pure Decoding ---")
+    
+    results = {}
+    
+    # Extract period data
+    period_start_sample = int((period_config['tmin'] - DELAY_CONFIG['tmin']) * sfreq)
+    period_end_sample = int((period_config['tmax'] - DELAY_CONFIG['tmin']) * sfreq)
+    period_data = epochs_data[:, :, period_start_sample:period_end_sample]
+    
+    # Voice decoding
+    pseudo_trial_params = {'feature': 'voice'}
+    result = decode_sliding_window_fixed(
+        period_data, events, sfreq, period_config,
+        "Feature-Pure", "voice_pure", n_iterations,
+        pseudo_trial_params
+    )
+    results['voice_pure'] = result
+    
+    # Location decoding  
+    pseudo_trial_params = {'feature': 'location'}
+    result = decode_sliding_window_fixed(
+        period_data, events, sfreq, period_config,
+        "Feature-Pure", "location_pure", n_iterations,
+        pseudo_trial_params
+    )
+    results['location_pure'] = result
+    
+    return results
+
+def run_condition_specific_decoding(epochs_data, events, sfreq, period_config, n_iterations):
+    """Fixed condition-specific decoding"""
+    write_log(f"\n--- Approach 3: Condition-Specific Decoding ---")
+    
+    results = {}
+    
+    # Extract period data
+    period_start_sample = int((period_config['tmin'] - DELAY_CONFIG['tmin']) * sfreq)
+    period_end_sample = int((period_config['tmax'] - DELAY_CONFIG['tmin']) * sfreq)
+    period_data = epochs_data[:, :, period_start_sample:period_end_sample]
+    
+    # Voice decoding
+    pseudo_trial_params = {'feature': 'voice'}
+    result = decode_sliding_window_fixed(
+        period_data, events, sfreq, period_config,
+        "Condition-Specific", "voice_specific", n_iterations,
+        pseudo_trial_params
+    )
+    results['voice_specific'] = result
+    
+    # Location decoding
+    pseudo_trial_params = {'feature': 'location'}
+    result = decode_sliding_window_fixed(
+        period_data, events, sfreq, period_config,
+        "Condition-Specific", "location_specific", n_iterations,
+        pseudo_trial_params
+    )
+    results['location_specific'] = result
+    
+    return results
 
 def main():
     """Main processing function"""
@@ -490,107 +595,120 @@ def main():
         write_log("Failed to load data. Exiting.")
         sys.exit(1)
     
-    write_log("\n=== EXTREME CONTRAST DECODING ANALYSIS ===")
-    write_log("=== Sp1 vs Sp4 (voice) and L1 vs L4 (location) ===")
+    write_log("\n=== COMPREHENSIVE DECODING ANALYSIS ===")
     
     # Results storage
     all_results = {}
     
-    # Process each ping period
-    for period_name, period_config in PING_PERIODS.items():
-        write_log(f"\n--- Processing {period_name}: {period_config['description']} ---")
-        
-        period_results = {}
-        
-        # Process each extreme comparison
-        for comparison_name, groupings in EXTREME_GROUPINGS.items():
-            
-            results = decode_extreme_period(
-                epochs_data, events, sfreq, period_config, 
-                comparison_name, groupings, args.n_iterations
-            )
-            
-            if results is not None:
-                period_results[comparison_name] = results
-            else:
-                write_log(f"  Skipping {comparison_name} due to insufficient data")
-        
-        all_results[period_name] = period_results
+    # Run all three decoding approaches over the full delay period
+    period_results = {}
+    
+    # Approach 1: Extreme Contrast
+    extreme_results = run_extreme_contrast_decoding(
+        epochs_data, events, sfreq, DELAY_CONFIG, args.n_iterations
+    )
+    period_results['extreme_contrast'] = extreme_results
+    
+    # Approach 2: Feature-Pure
+    feature_pure_results = run_feature_pure_decoding(
+        epochs_data, events, sfreq, DELAY_CONFIG, args.n_iterations
+    )
+    period_results['feature_pure'] = feature_pure_results
+    
+    # Approach 3: Condition-Specific
+    condition_specific_results = run_condition_specific_decoding(
+        epochs_data, events, sfreq, DELAY_CONFIG, args.n_iterations
+    )
+    period_results['condition_specific'] = condition_specific_results
+
+    all_results['full_delay'] = period_results
     
     # Save results
     write_log(f"\nSaving results...")
     
-    # Save temporal results
+    # Save temporal results for each approach
     for period_name, period_results in all_results.items():
-        for comparison_name, results in period_results.items():
-            # Save temporal data
-            np.save(f'{OUTPUT_DIR}/{period_name}_{comparison_name}_mean_scores.npy', 
-                   results['mean_scores'])
-            np.save(f'{OUTPUT_DIR}/{period_name}_{comparison_name}_std_scores.npy', 
-                   results['std_scores'])
-            np.save(f'{OUTPUT_DIR}/{period_name}_{comparison_name}_timepoints.npy', 
-                   results['timepoints'])
-            np.save(f'{OUTPUT_DIR}/{period_name}_{comparison_name}_all_scores.npy', 
-                   results['all_scores'])
-            np.save(f'{OUTPUT_DIR}/{period_name}_{comparison_name}_c_values.npy', 
-                   [r['c_values'] for r in results['iteration_results']])
+        for approach_name, approach_results in period_results.items():
+            for feature_name, results in approach_results.items():
+                # Save temporal data
+                np.save(f'{OUTPUT_DIR}/{period_name}_{approach_name}_{feature_name}_mean_scores.npy', 
+                       results['mean_scores'])
+                np.save(f'{OUTPUT_DIR}/{period_name}_{approach_name}_{feature_name}_std_scores.npy', 
+                       results['std_scores'])
+                np.save(f'{OUTPUT_DIR}/{period_name}_{approach_name}_{feature_name}_timepoints.npy', 
+                       results['timepoints'])
+                np.save(f'{OUTPUT_DIR}/{period_name}_{approach_name}_{feature_name}_all_scores.npy', 
+                       results['all_scores'])
     
-    # Save comprehensive summary
+    # Create comprehensive summary
     summary = {
         'subject': args.subject,
         'n_iterations': args.n_iterations,
         'periods': list(all_results.keys()),
-        'comparisons': list(EXTREME_GROUPINGS.keys()),
+        'approaches': ['extreme_contrast', 'feature_pure', 'condition_specific'],
         'processing_time': str(datetime.now()),
-        'method': 'extreme_contrast_decoding',
         'window_length_ms': WINDOW_LENGTH_SEC * 1000,
         'window_step_ms': WINDOW_STEP_SEC * 1000,
-        'averaging_scheme': AVERAGING_SCHEME,
         'normalization': 'StandardScaler (feature-wise)',
         'results': {}
     }
     
-    # Add detailed results
+    # Add detailed results and comparisons
     for period_name, period_results in all_results.items():
         summary['results'][period_name] = {}
-        for comparison_name, results in period_results.items():
-            if results is not None:
-                summary['results'][period_name][comparison_name] = {
+        
+        # Store results for each approach
+        for approach_name, approach_results in period_results.items():
+            summary['results'][period_name][approach_name] = {}
+            for feature_name, results in approach_results.items():
+                summary['results'][period_name][approach_name][feature_name] = {
                     'mean_accuracy': float(np.mean(results['mean_scores'])),
                     'peak_accuracy': float(np.max(results['mean_scores'])),
                     'peak_time': float(results['timepoints'][np.argmax(results['mean_scores'])]),
-                    'time_window': f"{period_config['tmin']}-{period_config['tmax']}s",
-                    'n_timepoints': len(results['timepoints']),
-                    'groupings': results['groupings']
+                    'n_timepoints': len(results['timepoints'])
                 }
     
-    # Compare periods
-    write_log(f"\n=== COMPARISON BETWEEN PERIODS ===")
-    for comparison_name in EXTREME_GROUPINGS.keys():
-        if (comparison_name in all_results['pre_ping'] and 
-            comparison_name in all_results['post_ping']):
-            
-            pre_mean = np.mean(all_results['pre_ping'][comparison_name]['mean_scores'])
-            post_mean = np.mean(all_results['post_ping'][comparison_name]['mean_scores'])
-            difference = post_mean - pre_mean
-            
-            write_log(f"{comparison_name}:")
-            write_log(f"  Pre-ping:  {pre_mean:.3f}")
-            write_log(f"  Post-ping: {post_mean:.3f}")
-            write_log(f"  Difference: {difference:+.3f}")
-            
-            summary['results'][f'{comparison_name}_comparison'] = {
-                'pre_ping_mean_accuracy': float(pre_mean),
-                'post_ping_mean_accuracy': float(post_mean),
-                'difference': float(difference)
-            }
+    # Compare approaches
+    write_log(f"\n=== APPROACH COMPARISONS ===")
     
-    with open(f'{OUTPUT_DIR}/extreme_contrast_summary.json', 'w') as f:
+    for period_name in all_results.keys():
+        write_log(f"\n{period_name}:")
+        
+        # Voice comparisons
+        write_log(f"\nVoice decoding:")
+        if 'voice_extreme' in all_results[period_name]['extreme_contrast']:
+            extreme_voice = np.mean(all_results[period_name]['extreme_contrast']['voice_extreme']['mean_scores'])
+            write_log(f"  Extreme (Sp1 vs Sp4):     {extreme_voice:.3f}")
+        
+        if 'voice_pure' in all_results[period_name]['feature_pure']:
+            pure_voice = np.mean(all_results[period_name]['feature_pure']['voice_pure']['mean_scores'])
+            write_log(f"  Feature-Pure:             {pure_voice:.3f}")
+        
+        if 'voice_specific' in all_results[period_name]['condition_specific']:
+            specific_voice = np.mean(all_results[period_name]['condition_specific']['voice_specific']['mean_scores'])
+            write_log(f"  Condition-Specific:       {specific_voice:.3f}")
+        
+        # Location comparisons
+        write_log(f"\nLocation decoding:")
+        if 'location_extreme' in all_results[period_name]['extreme_contrast']:
+            extreme_location = np.mean(all_results[period_name]['extreme_contrast']['location_extreme']['mean_scores'])
+            write_log(f"  Extreme (L1 vs L4):       {extreme_location:.3f}")
+        
+        if 'location_pure' in all_results[period_name]['feature_pure']:
+            pure_location = np.mean(all_results[period_name]['feature_pure']['location_pure']['mean_scores'])
+            write_log(f"  Feature-Pure:             {pure_location:.3f}")
+        
+        if 'location_specific' in all_results[period_name]['condition_specific']:
+            specific_location = np.mean(all_results[period_name]['condition_specific']['location_specific']['mean_scores'])
+            write_log(f"  Condition-Specific:       {specific_location:.3f}")
+    
+    # Save summary
+    with open(f'{OUTPUT_DIR}/comprehensive_summary.json', 'w') as f:
         json.dump(summary, f, indent=2)
     
     write_log(f"\nProcessing completed at: {datetime.now()}")
     
-    print(f"Subject {args.subject} extreme contrast analysis completed successfully!")
+    print(f"Subject {args.subject} comprehensive analysis completed successfully!")
     print(f"Results saved to: {OUTPUT_DIR}")
 
 if __name__ == "__main__":
