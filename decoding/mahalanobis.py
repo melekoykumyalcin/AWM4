@@ -32,7 +32,7 @@ import seaborn as sns
 # Parse command line arguments
 parser = argparse.ArgumentParser(description='Run Mahalanobis distance decoding and RSA analysis')
 parser.add_argument('--subject', type=int, required=True, help='Subject ID')
-parser.add_argument('--n_iterations', type=int, default=50, help='Number of iterations')
+parser.add_argument('--n_iterations', type=int, default=5, help='Number of iterations')
 parser.add_argument('--n_folds', type=int, default=5, help='Number of CV folds')
 parser.add_argument('--n_jobs', type=int, default=20, help='Number of parallel jobs')
 parser.add_argument('--tmin', type=float, default=2.0, help='Start time of analysis window')
@@ -97,7 +97,7 @@ class MahalanobisDecoder:
     Implements Mahalanobis distance decoding for multi-class problems
     Following Wolff et al. approach
     """
-    def __init__(self, n_repetitions=50, n_folds=8):
+    def __init__(self, n_repetitions=10, n_folds=5):
         self.n_repetitions = n_repetitions
         self.n_folds = n_folds
         
@@ -211,7 +211,7 @@ class RSAAnalyzer:
     """
     Implements Representational Similarity Analysis
     """
-    def __init__(self, n_iterations=50):
+    def __init__(self, n_iterations=5):
         self.n_iterations = n_iterations
         
     def compute_neural_rdm(self, X, conditions):
@@ -481,7 +481,7 @@ def mahalanobis_sliding_window(epochs_data, events, sfreq, feature='speaker',
         'n_classes': len(unique_labels)
     }
 
-def rsa_sliding_window(epochs_data, events, sfreq, feature='speaker', n_iterations=50):
+def rsa_sliding_window(epochs_data, events, sfreq, feature='speaker', n_iterations=5):
     """
     Run RSA with sliding window
     """
