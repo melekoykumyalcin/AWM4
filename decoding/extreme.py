@@ -43,7 +43,7 @@ CORRECTED_DATA = HOME_DIR + '/AWM4_data/raw/correctTriggers/'
 PROCESSED_DIR = HOME_DIR + '/AWM4_data/processed/'
 
 # Create output directory
-OUTPUT_DIR = PROCESSED_DIR + f'extremesDecoding/subject_{args.subject}/'
+OUTPUT_DIR = PROCESSED_DIR + f'extremesDecodingcorrected/subject_{args.subject}/'
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Log file path
@@ -269,106 +269,237 @@ def load_subject_data(subject, meta_info):
         write_log(traceback.format_exc())
         return None, None, None
 
-def create_pseudo_trials_extreme(data, labels, n_trials_per_pseudo=6):
-    """Create pseudo-trials for extreme contrast (Approach 1)"""
+def create_pseudo_trials_extreme(data, events, comparison='voice_extreme'):
+    """Create pseudo-trials for extreme contrast with balanced sampling"""
     pseudo_trials = []
     pseudo_labels = []
     
-    # Process each class
-    for class_label in np.unique(labels):
-        class_indices = np.where(labels == class_label)[0]
+    if comparison == 'voice_extreme':
+        # For Sp1 vs Sp4, ensure equal sampling from each location
+        sp1_by_location = {1: [], 2: [], 3: [], 4: []}
+        sp4_by_location = {1: [], 2: [], 3: [], 4: []}
         
-        # Shuffle indices
-        np.random.shuffle(class_indices)
-        
-        # Create pseudo-trials
-        n_pseudo = len(class_indices) // n_trials_per_pseudo
-        
-        for i in range(n_pseudo):
-            start_idx = i * n_trials_per_pseudo
-            end_idx = start_idx + n_trials_per_pseudo
+        for idx, event in enumerate(events):
+            speaker = (event // 10) % 10
+            location = event % 10
             
-            if end_idx <= len(class_indices):
-                selected_indices = class_indices[start_idx:end_idx]
-                pseudo_trial = np.mean(data[selected_indices], axis=0)
+            if speaker == 1:
+                sp1_by_location[location].append(idx)
+            elif speaker == 4:
+                sp4_by_location[location].append(idx)
+        
+        # Create pseudo-trials with 3 trials from each location
+        n_trials_per_location = 3
+        
+        # For Sp1
+        min_available_sp1 = min(len(indices) for indices in sp1_by_location.values())
+        n_pseudo_sp1 = min_available_sp1 // n_trials_per_location
+        
+        for _ in range(n_pseudo_sp1):
+            sampled_indices = []
+            for loc in [1, 2, 3, 4]:
+                if len(sp1_by_location[loc]) >= n_trials_per_location:
+                    sampled = np.random.choice(sp1_by_location[loc], n_trials_per_location, replace=False)
+                    sampled_indices.extend(sampled)
+                    sp1_by_location[loc] = [i for i in sp1_by_location[loc] if i not in sampled]
+            
+            if len(sampled_indices) == 12:  # 3×4 locations
+                pseudo_trial = np.mean(data[sampled_indices], axis=0)
                 pseudo_trials.append(pseudo_trial)
-                pseudo_labels.append(class_label)
+                pseudo_labels.append(0)
+        
+        # For Sp4
+        min_available_sp4 = min(len(indices) for indices in sp4_by_location.values())
+        n_pseudo_sp4 = min_available_sp4 // n_trials_per_location
+        
+        for _ in range(n_pseudo_sp4):
+            sampled_indices = []
+            for loc in [1, 2, 3, 4]:
+                if len(sp4_by_location[loc]) >= n_trials_per_location:
+                    sampled = np.random.choice(sp4_by_location[loc], n_trials_per_location, replace=False)
+                    sampled_indices.extend(sampled)
+                    sp4_by_location[loc] = [i for i in sp4_by_location[loc] if i not in sampled]
+            
+            if len(sampled_indices) == 12:
+                pseudo_trial = np.mean(data[sampled_indices], axis=0)
+                pseudo_trials.append(pseudo_trial)
+                pseudo_labels.append(1)
+                
+    else:  # location_extreme
+        # For L1 vs L4, ensure equal sampling from each speaker
+        l1_by_speaker = {1: [], 2: [], 3: [], 4: []}
+        l4_by_speaker = {1: [], 2: [], 3: [], 4: []}
+        
+        for idx, event in enumerate(events):
+            speaker = (event // 10) % 10
+            location = event % 10
+            
+            if location == 1:
+                l1_by_speaker[speaker].append(idx)
+            elif location == 4:
+                l4_by_speaker[speaker].append(idx)
+        
+        # Similar process for locations...
+        n_trials_per_speaker = 3
+        
+        # For L1
+        min_available_l1 = min(len(indices) for indices in l1_by_speaker.values())
+        n_pseudo_l1 = min_available_l1 // n_trials_per_speaker
+        
+        for _ in range(n_pseudo_l1):
+            sampled_indices = []
+            for sp in [1, 2, 3, 4]:
+                if len(l1_by_speaker[sp]) >= n_trials_per_speaker:
+                    sampled = np.random.choice(l1_by_speaker[sp], n_trials_per_speaker, replace=False)
+                    sampled_indices.extend(sampled)
+                    l1_by_speaker[sp] = [i for i in l1_by_speaker[sp] if i not in sampled]
+            
+            if len(sampled_indices) == 12:
+                pseudo_trial = np.mean(data[sampled_indices], axis=0)
+                pseudo_trials.append(pseudo_trial)
+                pseudo_labels.append(0)
+        
+        # For L4 (similar process)
+        min_available_l4 = min(len(indices) for indices in l4_by_speaker.values())
+        n_pseudo_l4 = min_available_l4 // n_trials_per_speaker
+        
+        for _ in range(n_pseudo_l4):
+            sampled_indices = []
+            for sp in [1, 2, 3, 4]:
+                if len(l4_by_speaker[sp]) >= n_trials_per_speaker:
+                    sampled = np.random.choice(l4_by_speaker[sp], n_trials_per_speaker, replace=False)
+                    sampled_indices.extend(sampled)
+                    l4_by_speaker[sp] = [i for i in l4_by_speaker[sp] if i not in sampled]
+            
+            if len(sampled_indices) == 12:
+                pseudo_trial = np.mean(data[sampled_indices], axis=0)
+                pseudo_trials.append(pseudo_trial)
+                pseudo_labels.append(1)
+    
+    if len(pseudo_trials) > 0:
+        return np.array(pseudo_trials), np.array(pseudo_labels)
+    else:
+        return None, None
+    
+def create_feature_pure_pseudo_trials(data, events, feature='voice'):
+    """Create pseudo-trials ignoring orthogonal dimension (Approach 2)"""
+    
+    if feature == 'voice':
+        groups = FEATURE_PURE_GROUPINGS['voice_pure']['groups']
+        group_labels = FEATURE_PURE_GROUPINGS['voice_pure']['labels']
+    else:
+        groups = FEATURE_PURE_GROUPINGS['location_pure']['groups']
+        group_labels = FEATURE_PURE_GROUPINGS['location_pure']['labels']
+    
+    pseudo_trials = []
+    pseudo_labels = []
+    
+    for group_name, conditions in groups.items():
+        # Get all trials for this group
+        group_indices = [i for i, e in enumerate(events) if e in conditions]
+        
+        if len(group_indices) < 12:  # Need at least 12 trials
+            continue
+        
+        # Create sub-condition groups for balanced sampling
+        sub_conditions = {}
+        
+        if feature == 'voice':
+            # Group by location within this speaker
+            for idx in group_indices:
+                location = events[idx] % 10  # Extract location
+                if location not in sub_conditions:
+                    sub_conditions[location] = []
+                sub_conditions[location].append(idx)
+        else:
+            # Group by speaker within this location
+            for idx in group_indices:
+                speaker = (events[idx] // 10) % 10  # Extract speaker
+                if speaker not in sub_conditions:
+                    sub_conditions[speaker] = []
+                sub_conditions[speaker].append(idx)
+        
+        # Check if we have all 4 sub-conditions
+        if len(sub_conditions) < 4:
+            continue
+        
+        # Create pseudo-trials with balanced sampling
+        n_trials_per_sub = 3  # Sample 3 from each sub-condition
+        min_available = min(len(indices) for indices in sub_conditions.values())
+        n_pseudo = min_available // n_trials_per_sub
+        
+        for _ in range(n_pseudo):
+            sampled_indices = []
+            for sub_cond, indices in sub_conditions.items():
+                if len(indices) >= n_trials_per_sub:
+                    # Sample n_trials_per_sub from this sub-condition
+                    sampled = np.random.choice(indices, n_trials_per_sub, replace=False)
+                    sampled_indices.extend(sampled)
+                    # Remove sampled trials
+                    sub_conditions[sub_cond] = [i for i in indices if i not in sampled]
+            
+            if len(sampled_indices) == 12:  # Should have 3×4=12 trials
+                # Create pseudo-trial by averaging all sampled trials
+                pseudo_trial = np.mean(data[sampled_indices], axis=0)
+                pseudo_trials.append(pseudo_trial)
+                pseudo_labels.append(group_labels[group_name])
     
     if len(pseudo_trials) > 0:
         return np.array(pseudo_trials), np.array(pseudo_labels)
     else:
         return None, None
 
-def create_feature_pure_pseudo_trials(data, events, feature='voice'):
-    """
-    Simplified feature-pure pseudo-trial creation
-    """
-    if feature == 'voice':
-        # Group by speaker: Sp1,2 vs Sp3,4
-        low_conditions = [111, 112, 113, 114, 121, 122, 123, 124,  # Sp1, Sp2
-                         211, 212, 213, 214, 221, 222, 223, 224]
-        high_conditions = [131, 132, 133, 134, 141, 142, 143, 144,  # Sp3, Sp4
-                          231, 232, 233, 234, 241, 242, 243, 244]
-    else:  # location
-        # Group by location: L1,2 vs L3,4
-        low_conditions = [111, 112, 121, 122, 131, 132, 141, 142,  # L1, L2
-                         211, 212, 221, 222, 231, 232, 241, 242]
-        high_conditions = [113, 114, 123, 124, 133, 134, 143, 144,  # L3, L4
-                          213, 214, 223, 224, 233, 234, 243, 244]
-    
-    # Create labels
-    labels = []
-    for event in events:
-        if event in low_conditions:
-            labels.append(0)
-        elif event in high_conditions:
-            labels.append(1)
-        else:
-            labels.append(-1)  # Invalid
-    
-    # Filter valid trials
-    valid_indices = np.array(labels) != -1
-    if np.sum(valid_indices) < 12:
-        return None, None
-    
-    filtered_data = data[valid_indices]
-    filtered_labels = np.array(labels)[valid_indices]
-    
-    # Create pseudo-trials
-    return create_pseudo_trials_extreme(filtered_data, filtered_labels, n_trials_per_pseudo=3)
-
 def create_condition_specific_pseudo_trials(data, events, feature='voice'):
-    """
-    Simplified condition-specific pseudo-trial creation
-    """
-    # Create labels based on feature
-    labels = []
-    for event in events:
-        if event >= 111 and event <= 244:  # Valid event codes
-            if feature == 'voice':
-                speaker = (event // 10) % 10  # Extract speaker (1-4)
-                labels.append(0 if speaker <= 2 else 1)  # Sp1,2 vs Sp3,4
-            else:  # location
-                location = event % 10  # Extract location (1-4)
-                labels.append(0 if location <= 2 else 1)  # L1,2 vs L3,4
-        else:
-            labels.append(-1)  # Invalid
+    """Create pseudo-trials within each condition (Approach 3)"""
     
-    # Filter valid trials
-    valid_indices = np.array(labels) != -1
-    if np.sum(valid_indices) < 12:
+    # All 16 condition codes
+    all_condition_codes = []
+    for stim in [1, 2]:
+        for sp in range(1, 5):
+            for loc in range(1, 5):
+                all_condition_codes.append(stim*100 + sp*10 + loc)
+    
+    # Create pseudo-trials for each condition
+    all_pseudo_trials = []
+    all_labels = []
+    
+    for cond_code in all_condition_codes:
+        # Get trials for this specific condition
+        cond_indices = [i for i, e in enumerate(events) if e == cond_code]
+        
+        if len(cond_indices) >= 3:  # Need at least 3 trials
+            # Create pseudo-trials
+            n_pseudo = len(cond_indices) // 3
+            
+            np.random.shuffle(cond_indices)
+            for i in range(n_pseudo):
+                start_idx = i * 3
+                end_idx = start_idx + 3
+                if end_idx <= len(cond_indices):
+                    selected = cond_indices[start_idx:end_idx]
+                    pseudo_trial = np.mean(data[selected], axis=0)
+                    all_pseudo_trials.append(pseudo_trial)
+                    
+                    # Assign label based on feature
+                    sp = (cond_code // 10) % 10
+                    loc = cond_code % 10
+                    
+                    if feature == 'voice':
+                        label = 0 if sp in [1, 2] else 1
+                    else:  # location
+                        label = 0 if loc in [1, 2] else 1
+                    
+                    all_labels.append(label)
+    
+    if len(all_pseudo_trials) > 0:
+        return np.array(all_pseudo_trials), np.array(all_labels)
+    else:
         return None, None
-    
-    filtered_data = data[valid_indices]
-    filtered_labels = np.array(labels)[valid_indices]
-    
-    # Create pseudo-trials
-    return create_pseudo_trials_extreme(filtered_data, filtered_labels, n_trials_per_pseudo=3)
 
-def decode_sliding_window_fixed(period_data, events, sfreq, period_config, approach_name, 
-                               feature_name, n_iterations, pseudo_trial_params):
+def decode_sliding_window(period_data, events, sfreq, period_config, approach_name, 
+                         feature_name, n_iterations, pseudo_trial_func, **kwargs):
     """
-    Fixed sliding window decoding - clean and simple approach
+    Generic sliding window decoding for any approach
     """
     write_log(f"\n  {approach_name} - {feature_name} in {period_config['description']}")
     
@@ -379,10 +510,12 @@ def decode_sliding_window_fixed(period_data, events, sfreq, period_config, appro
     n_windows = int((n_times - window_length) / window_step) + 1
     
     # Storage for results across iterations
-    all_scores = []
+    iteration_results = []
     
     for iteration in range(n_iterations):
-        window_scores = []
+        # Results for this iteration
+        window_scores = np.zeros(n_windows)
+        window_c_values = []
         
         # Process each sliding window
         for window_idx in tqdm(range(n_windows), desc=f"{approach_name} {feature_name} iter {iteration+1}", 
@@ -395,59 +528,143 @@ def decode_sliding_window_fixed(period_data, events, sfreq, period_config, appro
             n_trials, n_channels, n_times_win = window_data.shape
             flattened_data = window_data.reshape(n_trials, n_channels * n_times_win)
             
-            # Create pseudo-trials and labels based on approach
-            if approach_name == "Extreme Contrast":
-                # For extreme contrast, we already have filtered data and simple labels
-                valid_indices = pseudo_trial_params['valid_indices']
-                labels = pseudo_trial_params['labels']
-                
+            # Outer cross-validation
+            outer_cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=None)
+            outer_scores = []
+            best_cs = []
+            
+            if 'valid_indices' in kwargs and kwargs['valid_indices'] is not None:
+                # Extreme Contrast: use all data with events for balanced sampling
+                initial_pseudo_data, initial_labels = pseudo_trial_func(
+                    flattened_data,
+                    events,
+                    comparison=kwargs.get('comparison', 'voice_extreme')
+                )
+            else:
+                # Feature-Pure and Condition-Specific: use full data with events
+                initial_pseudo_data, initial_labels = pseudo_trial_func(
+                    flattened_data,
+                    events,
+                    **kwargs
+                )
+            
+            if initial_pseudo_data is None or len(np.unique(initial_labels)) < 2:
+                window_scores[window_idx] = 0.5
+                window_c_values.append(1.0)
+                continue
+            
+            # For approaches that need filtering (extreme contrast)
+            if 'valid_indices' in kwargs and kwargs['valid_indices'] is not None:
+                valid_indices = kwargs['valid_indices']
+                labels = kwargs['labels']
                 filtered_data = flattened_data[valid_indices]
                 filtered_labels = np.array(labels)
                 
-                # Create pseudo-trials
-                pseudo_data, pseudo_labels = create_pseudo_trials_extreme(
-                    filtered_data, filtered_labels, n_trials_per_pseudo=6
-                )
-                
-            elif approach_name == "Feature-Pure":
-                # For feature-pure, create pseudo-trials ignoring orthogonal dimension
-                pseudo_data, pseudo_labels = create_feature_pure_pseudo_trials(
-                    flattened_data, events, pseudo_trial_params['feature']
-                )
-                
-            elif approach_name == "Condition-Specific":
-                # For condition-specific, create pseudo-trials within each condition
-                pseudo_data, pseudo_labels = create_condition_specific_pseudo_trials(
-                    flattened_data, events, pseudo_trial_params['feature']
-                )
+                # Use filtered data for CV
+                cv_data = filtered_data
+                cv_labels = filtered_labels
+            else:
+                # For other approaches, we need to work with all data
+                # but create labels based on the approach
+                cv_data = flattened_data
+                cv_labels = events  # Will be used inside the loop
             
-            # Check if we have valid data
-            if (pseudo_data is None or len(pseudo_data) < 6 or 
-                len(np.unique(pseudo_labels)) < 2):
-                window_scores.append(0.5)
+            # Outer CV loop
+            try:
+                for train_idx, test_idx in outer_cv.split(initial_pseudo_data, initial_labels):
+                    # For extreme contrast approach
+                    if 'valid_indices' in kwargs and kwargs['valid_indices'] is not None:
+                        # Create pseudo-trials for train and test
+                        train_pseudo_data, train_pseudo_labels = create_pseudo_trials_extreme(
+                            cv_data[train_idx], events[train_idx], 
+                            comparison=kwargs.get('comparison', 'voice_extreme')
+                        )
+                        test_pseudo_data, test_pseudo_labels = create_pseudo_trials_extreme(
+                            cv_data[test_idx], events[test_idx], 
+                            comparison=kwargs.get('comparison', 'voice_extreme')
+                        )
+                    else:
+                        # For feature-pure and condition-specific approaches
+                        # We need to recreate pseudo-trials for train/test separately
+                        train_events = events[train_idx] if hasattr(events, '__len__') else events
+                        test_events = events[test_idx] if hasattr(events, '__len__') else events
+                        
+                        train_pseudo_data, train_pseudo_labels = pseudo_trial_func(
+                            cv_data[train_idx], train_events, **kwargs
+                        )
+                        test_pseudo_data, test_pseudo_labels = pseudo_trial_func(
+                            cv_data[test_idx], test_events, **kwargs
+                        )
+                    
+                    # Skip if not enough data
+                    if (train_pseudo_data is None or test_pseudo_data is None or
+                        len(train_pseudo_data) < 4 or len(test_pseudo_data) < 2 or
+                        len(np.unique(train_pseudo_labels)) < 2 or len(np.unique(test_pseudo_labels)) < 2):
+                        continue
+                    
+                    # Inner CV for hyperparameter selection
+                    best_score = -1
+                    best_c = 1.0
+                    
+                    inner_cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=None)
+                    
+                    for c_value in PARAM_GRID:
+                        clf = make_pipeline(
+                            StandardScaler(),
+                            SVC(kernel='linear', C=c_value, probability=True)
+                        )
+                        
+                        try:
+                            inner_scores = cross_val_score(
+                                clf, train_pseudo_data, train_pseudo_labels, 
+                                cv=inner_cv, 
+                                scoring='accuracy',
+                                n_jobs=1
+                            )
+                            mean_inner_score = np.mean(inner_scores)
+                            
+                            if mean_inner_score > best_score:
+                                best_score = mean_inner_score
+                                best_c = c_value
+                        except:
+                            continue
+                    
+                    # Train final model
+                    final_clf = make_pipeline(
+                        StandardScaler(),
+                        SVC(kernel='linear', C=best_c, probability=True)
+                    )
+                    
+                    try:
+                        final_clf.fit(train_pseudo_data, train_pseudo_labels)
+                        test_score = final_clf.score(test_pseudo_data, test_pseudo_labels)
+                        outer_scores.append(test_score)
+                        best_cs.append(best_c)
+                    except:
+                        continue
+            except:
+                window_scores[window_idx] = 0.5
+                window_c_values.append(1.0)
                 continue
             
-            # Simple cross-validation on pseudo-trials
-            cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=None)
-            
-            # Create classifier
-            clf = make_pipeline(
-                StandardScaler(),
-                SVC(kernel='linear', C=1.0, probability=True)
-            )
-            
-            try:
-                # Cross-validate directly on pseudo-trials
-                cv_scores = cross_val_score(clf, pseudo_data, pseudo_labels, 
-                                          cv=cv, scoring='accuracy', n_jobs=1)
-                window_scores.append(np.mean(cv_scores))
-            except:
-                window_scores.append(0.5)
+            # Store results for this window
+            if outer_scores:
+                window_scores[window_idx] = np.mean(outer_scores)
+                c_counter = Counter(best_cs)
+                most_common_c = c_counter.most_common(1)[0][0] if best_cs else 1.0
+                window_c_values.append(most_common_c)
+            else:
+                window_scores[window_idx] = 0.5
+                window_c_values.append(1.0)
         
-        all_scores.append(window_scores)
+        # Store iteration results
+        iteration_results.append({
+            'scores': window_scores,
+            'c_values': window_c_values
+        })
     
-    # Aggregate results
-    all_scores = np.array(all_scores)
+    # Aggregate results across iterations
+    all_scores = np.array([r['scores'] for r in iteration_results])
     mean_scores = np.mean(all_scores, axis=0)
     std_scores = np.std(all_scores, axis=0)
     
@@ -464,12 +681,13 @@ def decode_sliding_window_fixed(period_data, events, sfreq, period_config, appro
         'std_scores': std_scores,
         'timepoints': timepoints,
         'all_scores': all_scores,
+        'iteration_results': iteration_results,
         'approach': approach_name,
         'feature': feature_name
     }
 
 def run_extreme_contrast_decoding(epochs_data, events, sfreq, period_config, n_iterations):
-    """Fixed extreme contrast decoding"""
+    """Run extreme contrast decoding (Approach 1)"""
     write_log(f"\n--- Approach 1: Extreme Contrast Decoding ---")
     
     results = {}
@@ -504,25 +722,20 @@ def run_extreme_contrast_decoding(epochs_data, events, sfreq, period_config, n_i
         period_end_sample = int((period_config['tmax'] - DELAY_CONFIG['tmin']) * sfreq)
         period_data = epochs_data[:, :, period_start_sample:period_end_sample]
         
-        # Prepare parameters for the decoding function
-        pseudo_trial_params = {
-            'valid_indices': valid_indices,
-            'labels': labels
-        }
-        
         # Run decoding
-        result = decode_sliding_window_fixed(
+        result = decode_sliding_window(
             period_data, events, sfreq, period_config,
             "Extreme Contrast", comparison_name, n_iterations,
-            pseudo_trial_params
+            create_pseudo_trials_extreme,
+            valid_indices=valid_indices, labels=labels, comparison=comparison_name
         )
-        
+
         results[comparison_name] = result
     
     return results
 
 def run_feature_pure_decoding(epochs_data, events, sfreq, period_config, n_iterations):
-    """Fixed feature-pure decoding"""
+    """Run feature-pure decoding (Approach 2)"""
     write_log(f"\n--- Approach 2: Feature-Pure Decoding ---")
     
     results = {}
@@ -533,27 +746,27 @@ def run_feature_pure_decoding(epochs_data, events, sfreq, period_config, n_itera
     period_data = epochs_data[:, :, period_start_sample:period_end_sample]
     
     # Voice decoding
-    pseudo_trial_params = {'feature': 'voice'}
-    result = decode_sliding_window_fixed(
+    result = decode_sliding_window(
         period_data, events, sfreq, period_config,
         "Feature-Pure", "voice_pure", n_iterations,
-        pseudo_trial_params
+        create_feature_pure_pseudo_trials,
+        feature='voice'
     )
     results['voice_pure'] = result
     
-    # Location decoding  
-    pseudo_trial_params = {'feature': 'location'}
-    result = decode_sliding_window_fixed(
+    # Location decoding
+    result = decode_sliding_window(
         period_data, events, sfreq, period_config,
         "Feature-Pure", "location_pure", n_iterations,
-        pseudo_trial_params
+        create_feature_pure_pseudo_trials,
+        feature='location'
     )
     results['location_pure'] = result
     
     return results
 
 def run_condition_specific_decoding(epochs_data, events, sfreq, period_config, n_iterations):
-    """Fixed condition-specific decoding"""
+    """Run condition-specific decoding (Approach 3)"""
     write_log(f"\n--- Approach 3: Condition-Specific Decoding ---")
     
     results = {}
@@ -564,20 +777,20 @@ def run_condition_specific_decoding(epochs_data, events, sfreq, period_config, n
     period_data = epochs_data[:, :, period_start_sample:period_end_sample]
     
     # Voice decoding
-    pseudo_trial_params = {'feature': 'voice'}
-    result = decode_sliding_window_fixed(
+    result = decode_sliding_window(
         period_data, events, sfreq, period_config,
         "Condition-Specific", "voice_specific", n_iterations,
-        pseudo_trial_params
+        create_condition_specific_pseudo_trials,
+        feature='voice'
     )
     results['voice_specific'] = result
     
     # Location decoding
-    pseudo_trial_params = {'feature': 'location'}
-    result = decode_sliding_window_fixed(
+    result = decode_sliding_window(
         period_data, events, sfreq, period_config,
         "Condition-Specific", "location_specific", n_iterations,
-        pseudo_trial_params
+        create_condition_specific_pseudo_trials,
+        feature='location'
     )
     results['location_specific'] = result
     
