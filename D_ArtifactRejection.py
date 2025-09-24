@@ -1,298 +1,232 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Mon Apr 20 15:38:24 2020
-
-@author: Cora
+Manual Probe Artifact Rejection Script
+Visual inspection approach following MNE tutorial
+Interactive identification of ECG and EOG components
 """
-
-# MEG Python script of Cora - Analysis of Context MEG
-# Step C: Artifact identification (ECG and EOG) based on ICA
-# interactive script - has to be executed manually
 
 #%% Setup ####################################################################
 
-# Import libraries
 import os
 import locale
 import matplotlib
 import matplotlib.pyplot as plt
 matplotlib.use('Qt5Agg')
-plt.rcParams['figure.figsize'] = [10, 8]
-import numpy as np#, h5py
-#import scipy
+plt.rcParams['figure.figsize'] = [12, 8]
+import numpy as np
 import mne
 from mne.preprocessing import ICA
-from mne.preprocessing import create_ecg_epochs, create_eog_epochs
 import pandas as pd
-import autoreject
-from autoreject import get_rejection_threshold
-import scipy.stats
-from pynput.keyboard import Key, Controller
-keyboard = Controller()
 
 # Set paths
 homeDir = '/media/headmodel/Elements/AWM4/'
-os.chdir(homeDir) # change current directory
+PROBE_EPOCHS_PATH = homeDir + '/AWM4_data/processed/ProbeEpochs/'
+ICA_PATH = homeDir + '/AWM4_data/processed/ICAs/'
 
-# Load in meta information
+os.chdir(homeDir)
+
+# Load meta information
 metaFile = homeDir + 'MEGNotes.xlsx'
 metaInfo = pd.read_excel(metaFile)
-NrSessions = 1
-Subs       = np.unique(metaInfo.loc[metaInfo.FinalSample==1,'Subject'])
-#Subs       = Subs[Subs != 3] #exclude sub 3 for no, need noise file
+Subs = np.unique(metaInfo.loc[metaInfo.FinalSample==1,'Subject'])
 locale.setlocale(locale.LC_ALL, "en_US.utf8")
 
-# create function for plotting
-def show_images(images, rows = 3, titles = None):
-    """Display a list of images in a single figure with matplotlib.
-    
-    Parameters
-    ---------
-    images: List of np.arrays compatible with plt.imshow.
-    
-    rows (Default = 3): Number of rows in figure (number of columns is 
-                        set to np.ceil(n_images/float(rows))).
-    
-    titles: List of titles corresponding to each image. Must have
-            the same length as titles.
-    """
-    assert((titles is None)or (len(images) == len(titles)))
-    n_images = len(images)
-    if titles is None: 
-        titles = ['Image (%d)' % i for i in range(1,n_images + 1)]
-    fig = plt.figure()
-    cols = int(np.ceil(n_images / float(rows)))
-    for n, (image, title) in enumerate(zip(images, titles)):
-        a = fig.add_subplot(rows, cols, n + 1)
-        if image.ndim == 2:
-            plt.gray()
-        plt.imshow(image)
-        a.set_title(title)
-    fig.set_size_inches(np.array(fig.get_size_inches()) * n_images)
-    plt.show()
-    return fig
+#%% Interactive manual artifact rejection ###################################
 
-#%% Artifact rejection based on ICA ###########################################
+# Subject selection
+print("Available subjects:", Subs)
+actSubj = Subs[int(input("Subject no [1-" + str(len(Subs)) + "]: "))-1] 
+print(f"Selected subject: {actSubj}")
 
-# paths and file names
-data_path   = homeDir +'/AWM4_data/raw/'
-decim = 4
+# Load probe epochs (cleaned from jumps)
+probe_epochs_file = PROBE_EPOCHS_PATH + f'ProbeEpochs_VP{actSubj}-epo-dropped.fif'
+if not os.path.exists(probe_epochs_file):
+    print(f"Error: Cleaned probe epochs not found: {probe_epochs_file}")
+    exit()
 
-# Ask for subjects & session:
-# (as interaction with the data is required, no loop is used here)
-actSubj = Subs[int(input("Subject no [1-26]: "))-1] 
+print(f"Loading cleaned probe epochs...")
+ProbeTrials = mne.read_epochs(probe_epochs_file)
+print(f"Loaded {len(ProbeTrials)} probe epochs")
+
+# Load raw data
+raw_file = homeDir + f'/AWM4_data/processed/CutEpochs/CutData_VP{actSubj}-raw.fif'
+if os.path.exists(raw_file):
+    raw = mne.io.read_raw_fif(raw_file, preload=True)
+    print("Loaded raw data for overlay plots")
+else:
+    raw = None
+    print("Raw data not found - will use epochs for component inspection")
+
+# Load probe-specific ICA
+ica_file = ICA_PATH + f'probe_VP{actSubj}_fastica-ica.fif'
+if not os.path.exists(ica_file):
+    print(f"Error: Probe ICA file not found: {ica_file}")
+    exit()
+
+print(f"Loading probe ICA...")
+ica = mne.preprocessing.read_ica(ica_file)
+print(f"ICA loaded with {ica.n_components_} components")
+
+#%% Step 1: Plot all ICA sources for overview ##############################
+
+print(f"\n=== STEP 1: VISUAL INSPECTION OF ALL COMPONENTS ===")
+print("Look for:")
+print("- Eye blinks: large frontal components with regular timing")
+print("- Heartbeats: regular rhythm, often posterior components") 
+print("- Muscle artifacts: high frequency, temporally localized")
+print("- Line noise: 50/60 Hz patterns")
+
+# Plot component topographies (first 20-25 components)
+n_components_to_show = min(25, ica.n_components_)
+fig_topo = ica.plot_components(range(n_components_to_show), 
+                              title=f'ICA Components 0-{n_components_to_show-1}', 
+                              colorbar=True)
+
+# Plot time series of components
+if raw is not None:
+    raw.load_data()
+    print("Plotting component time series (close when done inspecting)...")
+    fig_sources = ica.plot_sources(raw, show_scrollbars=False, title='ICA Component Time Series')
+else:
+    print("Plotting component time series from epochs...")
+    fig_sources = ica.plot_sources(ProbeTrials, show_scrollbars=False, title='ICA Component Time Series')
+
+input("Press Enter after you've identified suspicious components...")
+
+#%% Step 2: Test individual components ######################################
+
+print(f"\n=== STEP 2: TEST INDIVIDUAL COMPONENTS ===")
+print("Test components by excluding them and seeing the effect")
+
+while True:
+    test_comp = input("Enter component number to test (or 'done' to finish): ").strip()
+    
+    if test_comp.lower() == 'done':
+        break
         
-# load cut epochs
-CombTrials = mne.read_epochs(str(homeDir)+'/AWM4_data/processed/CutEpochs/CutData_VP'+str(actSubj)+'-epo.fif')
-raw        = mne.io.read_raw_fif(str(homeDir)+'/AWM4_data/processed/CutEpochs/CutData_VP'+str(actSubj)+'-raw.fif',preload=True)
+    try:
+        comp_idx = int(test_comp)
+        if comp_idx >= ica.n_components_:
+            print(f"Component {comp_idx} doesn't exist. Max component: {ica.n_components_-1}")
+            continue
+            
+        print(f"\nTesting component {comp_idx}...")
+        
+        # Show component properties
+        if raw is not None:
+            fig_props = ica.plot_properties(raw, picks=[comp_idx])
+        else:
+            fig_props = ica.plot_properties(ProbeTrials, picks=[comp_idx])
+        
+        # Show overlay comparison
+        if raw is not None:
+            # Test on MEG magnetometers
+            fig_overlay_mag = ica.plot_overlay(raw, exclude=[comp_idx], picks='mag', 
+                                              title=f'Effect of excluding component {comp_idx} (MAG)')
+            # Test on MEG gradiometers  
+            fig_overlay_grad = ica.plot_overlay(raw, exclude=[comp_idx], picks='grad',
+                                               title=f'Effect of excluding component {comp_idx} (GRAD)')
+        else:
+            # Use epochs average if no raw data
+            evoked = ProbeTrials.average()
+            fig_overlay = ica.plot_overlay(evoked, exclude=[comp_idx], picks='mag')
+            
+        should_exclude = input(f"Should component {comp_idx} be excluded? [y/n]: ").strip().lower()
+        
+        if should_exclude == 'y':
+            if comp_idx not in ica.exclude:
+                ica.exclude.append(comp_idx)
+                print(f"Added component {comp_idx} to exclusion list")
+            else:
+                print(f"Component {comp_idx} already in exclusion list")
+        
+        plt.close('all')
+        
+    except ValueError:
+        print("Please enter a valid component number or 'done'")
+        continue
 
-# load ICA
-ica   = mne.preprocessing.ica.read_ica(str(homeDir)+'/AWM4_data/processed/ICAs/VP'+str(actSubj)+'_fastica-ica.fif')
-picks = mne.pick_types(CombTrials.info, meg=True, eeg=True, stim=False, 
-                    eog=False, ref_meg=False, include=[], exclude='bads') 
-title = 'Sources related to %s artifacts (red)'      
+#%% Step 3: Review final exclusions #########################################
 
-#to check all the IC time courses
-#ica.plot_sources(CombTrials, stop=60)
+print(f"\n=== STEP 3: FINAL REVIEW ===")
+print(f"Components to exclude: {sorted(ica.exclude)}")
+print(f"Total components to exclude: {len(ica.exclude)}")
 
-#%%
+if len(ica.exclude) > 0:
+    # Show final overview of excluded components
+    fig_excluded = ica.plot_components(ica.exclude, 
+                                     title='Components to be Excluded', 
+                                     colorbar=True)
+    
+    # Show final overlay with all exclusions
+    if raw is not None:
+        fig_final_overlay = ica.plot_overlay(raw, exclude=ica.exclude, picks='mag',
+                                           title='Final result with all exclusions (MAG)')
+    
+    final_confirm = input("Confirm these exclusions? [y/n]: ").strip().lower()
+    
+    if final_confirm != 'y':
+        print("Exclusions cancelled. You can re-run the script to try again.")
+        exit()
 
-# generate ECG epochs use detection via phase statistics
-n_max_ecg = 10
-#only for actsubj 1, use the MEG channels to detect ECG
-#ecg_epochs = create_ecg_epochs(raw, tmin=-.5, tmax=.5, picks=picks)
-ecg_epochs = create_ecg_epochs(raw, ch_name = 'EEG059-3609',tmin=-.5, tmax=.5, picks=picks) # find ecg epochs based on raw data
-ecg_epochs.decimate(decim).apply_baseline((None,None))
-ecg_inds, scores = ica.find_bads_ecg(ecg_epochs)
-
-# detect EOG by correlation
-n_max_eog = 20
-#only for actsubj 1, the following 2 lines were used to detect EOG
-#eog_events = mne.preprocessing.find_eog_events(raw, l_freq=.5,h_freq=20, ch_name = 'EEG058-3609')
-#eog_epochs1 = mne.preprocessing.create_eog_epochs(raw, tmin=-.2, tmax=.2, picks=picks,l_freq=.5,h_freq=20, ch_name = 'EEG058-3609') 
-eog_epochs1 = create_eog_epochs(raw, tmin=-.2, tmax=.2,ch_name = 'EEG060-3609', picks=picks,l_freq=.5,h_freq=20) # changed from plug A (57) to D (60)
-eog_epochs2 = create_eog_epochs(raw, tmin=-.2, tmax=.2,ch_name = 'EEG058-3609', picks=picks,l_freq=.5,h_freq=20)
-eog_epochs1.decimate(decim).apply_baseline((None, None))
-eog_epochs2.decimate(decim).apply_baseline((None, None))
-#if eog_epochs is empty...
-if not eog_epochs1:
-    eog_inds1=[]
-    scores_eog1=[]
 else:
-    eog_inds1, scores_eog1 = ica.find_bads_eog(eog_epochs1,ch_name = 'EEG060-3609', measure='correlation')
-if not eog_epochs2:
-    eog_inds2=[]
-    scores_eog2=[]
-else:    
-    eog_inds2, scores_eog2 = ica.find_bads_eog(eog_epochs2,ch_name = 'EEG058-3609', measure='correlation')
+    print("No components selected for exclusion.")
+    no_exclusion_confirm = input("Continue with no exclusions? [y/n]: ").strip().lower()
+    if no_exclusion_confirm != 'y':
+        print("Process cancelled.")
+        exit()
 
-# raw_sources = ica.get_sources(raw.copy())
-# raw_sources = raw_sources.get_data()
+#%% Step 4: Save clean ICA and apply to data ################################
 
-# raw_ecg = raw.get_data(picks='EEG059-3609')
-# raw_eog1 = raw.get_data(picks='EEG060-3609')
-# raw_eog2 = raw.get_data(picks='EEG058-3609')
-# raw_ecg = raw_ecg[:,np.shape(raw_ecg)[1]-np.shape(raw_sources)[1]:]
-# raw_eog1 = raw_eog1[:,np.shape(raw_eog1)[1]-np.shape(raw_sources)[1]:]
-# raw_eog2 = raw_eog2[:,np.shape(raw_eog2)[1]-np.shape(raw_sources)[1]:]
-# ecg_Rs = []
-# eog1_Rs = []
-# eog2_Rs = []
-# for sc in range(raw_sources.shape[0]):
-#     ecg_corr = scipy.stats.linregress(raw_sources[sc,:],raw_ecg)
-#     eog1_corr = scipy.stats.linregress(raw_sources[sc,:],raw_eog1)
-#     eog2_corr = scipy.stats.linregress(raw_sources[sc,:],raw_eog2)
-#     ecg_Rs.append(ecg_corr.rvalue)
-#     eog1_Rs.append(eog1_corr.rvalue)
-#     eog2_Rs.append(eog2_corr.rvalue)
+print(f"\n=== STEP 4: SAVING AND APPLYING CLEAN ICA ===")
 
-#%% detect ecg components - do until you're happy with the result
-ica.plot_scores(scores, exclude=ecg_inds, title=title % 'ecg', labels='ecg')
-show_picks = np.abs(scores).argsort()[::-1][:n_max_ecg]
-ica.plot_sources(raw, show_picks, title=title % 'ecg',stop=60)
-ica.plot_components(show_picks, title=title % 'ecg', colorbar=True)
-ica.plot_sources(ecg_epochs.average(), title='ECG average')
-ica.plot_overlay(ecg_epochs.average(), exclude=ecg_inds, picks='mag')
-ans = input("Do you agree? [y/n] ")
-if ans != "y":
-    ecg_inds = list(map(int, input("Please enter the ecg components (as: x y z): ").split())) 
+# Save clean ICA
+clean_ica_file = ICA_PATH + f'CleanProbeVP{actSubj}-ica.fif'
+ica.save(clean_ica_file, overwrite=True)
+print(f"Saved clean probe ICA: {clean_ica_file}")
+
+# Apply ICA to probe epochs
+print("Applying clean ICA to probe epochs...")
+ica_probe_epochs = ProbeTrials.copy()
+ica.apply(ica_probe_epochs)
+
+# Save cleaned probe epochs
+clean_epochs_file = PROBE_EPOCHS_PATH + f'ProbeEpochs_VP{actSubj}-cleanedICA-epo.fif'
+ica_probe_epochs.save(clean_epochs_file, overwrite=True)
+print(f"Saved ICA-cleaned probe epochs: {clean_epochs_file}")
+
+# Print final trial counts
+print(f"\nFinal cleaned probe epoch counts:")
+for event_name, event_id in ica_probe_epochs.event_id.items():
+    count = len(ica_probe_epochs[event_name])
+    print(f"  {event_name}: {count} trials")
+
+total_trials = len(ica_probe_epochs)
+print(f"Total cleaned probe trials: {total_trials}")
+
+# Optional: Compare before and after
+compare = input("\nShow before/after comparison plots? [y/n]: ").strip().lower()
+if compare == 'y':
+    # Pick some channels for comparison
+    picks_for_comparison = ['MEG0113', 'MEG0112', 'MEG0111', 'MEG0122', 'MEG0123']  # front channels
+    available_picks = [ch for ch in picks_for_comparison if ch in ProbeTrials.ch_names]
+    
+    if available_picks:
+        print("Plotting before/after comparison...")
+        
+        # Original data
+        fig_before = ProbeTrials.average().plot(picks=available_picks, 
+                                               titles='Before ICA cleaning',
+                                               show=False)
+        
+        # Cleaned data  
+        fig_after = ica_probe_epochs.average().plot(picks=available_picks,
+                                                   titles='After ICA cleaning',
+                                                   show=False)
+        
+        plt.show()
+
 plt.close('all')
-
-
-#%% create overview figure
-tmpfig, ax = plt.subplots(1, len(ecg_inds))
-ica.plot_components(ecg_inds, colorbar=True,show=False,axes=ax)
-tmpfig.savefig(str(homeDir)+'/AWM4_data/processed/tmp/tmp1.png')
-
-with mne.viz.use_browser_backend("matplotlib"):
-    tmpfig2 = ica.plot_sources(raw, ecg_inds, show_scrollbars=False)
-tmpfig2.savefig(str(homeDir)+'/AWM4_data/processed/tmp/tmp2.png')
-
-# tmpfig2 = ica.plot_sources(raw, ecg_inds,stop=60,show=False)
-# print('ADJUST Y AXIS MANUALLY BEFORE SAVING') 
-# tmpfig2.savefig(str(homeDir)+'/AWM4_data/processed/tmp/tmp2.png')
-
-tmpfig3 = ica.plot_overlay(ecg_epochs.average(), exclude=ecg_inds, picks='mag',show=False)
-tmpfig3.savefig(str(homeDir)+'/AWM4_data/processed/tmp/tmp3.png')
-
-
-image = []
-titles = []
-for im in range(3):
-    image.append(plt.imread(str(homeDir)+'/AWM4_data/processed/tmp/tmp' +str(im+1)+'.png'))
-    if im == 0:
-        titles.append('ECG components')
-    elif im == 1:
-        titles.append('ECG sources')
-    else:
-        titles.append('Exclusion result')    
-plt.close('all')
- 
-#%% EOG no 1 (horizontal)
-if eog_epochs1:
-    ica.plot_scores(scores_eog1, exclude=eog_inds1, title=title % 'eog1', labels='eog1') 
-    show_picks1 = np.abs(scores_eog1).argsort()[::-1][:n_max_eog]
-    ica.plot_sources(raw, show_picks1, title=title % 'eog1')
-    ica.plot_components(show_picks1, title=title % 'eog1', colorbar=True)
-    ica.plot_sources(eog_epochs1.average(), title='EOG 1 average')
-    ica.plot_overlay(eog_epochs1.average(), exclude=eog_inds1, picks='mag')
-
-print("Suggested components: " +str(eog_inds1))
-ans = input("Do you agree? [y/n] ")
-if ans != "y":
-    eog_inds1 = list(map(int, input("Please enter the eog1 components (as: x y z): ").split())) 
-plt.close('all')
-
-#%% create overview figure
-if not eog_inds1:
-    tmpfig = plt.plot()
-else:
-    tmpfig4, ax = plt.subplots(1, len(eog_inds1))
-    tmpfig4 = ica.plot_components(eog_inds1, colorbar=True,show=False,axes=ax)
-tmpfig4.savefig(str(homeDir)+'/AWM4_data/processed/tmp/tmp4.png')
-if not eog_inds1:
-    tmpfig = plt.plot()
-else:
-    with mne.viz.use_browser_backend("matplotlib"):
-        tmpfig5 = ica.plot_sources(raw, eog_inds1, stop=120, show=False)
-print('ADJUST Y AXIS MANUALLY BEFORE SAVING') 
-tmpfig5.savefig(str(homeDir)+'/AWM4_data/processed/tmp/tmp5.png')
-if eog_epochs1: 
-    tmpfig6 = ica.plot_overlay(eog_epochs1.average(), exclude=eog_inds1, picks='mag',show=False)
-else:
-    tmpfig6 = plt.plot()
-tmpfig6.savefig(str(homeDir)+'/AWM4_data/processed/tmp/tmp6.png')
-
-for im in range(3):
-    image.append(plt.imread(str(homeDir)+'/AWM4_data/processed/tmp/tmp' +str(im+4)+'.png'))
-    if im == 0:
-        titles.append('EOG1 components')
-    elif im == 1:
-        titles.append('EOG1 sources')
-    else:
-        titles.append('Exclusion result')    
-plt.close('all')
-
-#%% EOG no 2 (vertical)
-ica.plot_scores(scores_eog2, exclude=eog_inds2, title=title % 'eog2', labels='eog2')
-show_picks2 = np.abs(scores_eog2).argsort()[::-1][:n_max_eog]
-ica.plot_sources(raw, show_picks2, title=title % 'eog2')
-ica.plot_components(show_picks2, title=title % 'eog2', colorbar=True)
-ica.plot_sources(eog_epochs2.average(), title='EOG2 average')
-ica.plot_overlay(eog_epochs2.average(), exclude=eog_inds2, picks='mag')
-
-print("Suggested components: " +str(eog_inds2))
-ans = input("Do you agree? [y/n] ")
-if ans != "y":
-    eog_inds2 = list(map(int, input("Please enter the eog2 components (as: x y z): ").split())) 
-plt.close('all')
-
-#%% create overview figure
-tmpfig7, ax = plt.subplots(1, len(ecg_inds))
-tmpfig7 = ica.plot_components(eog_inds2, colorbar=True,show=False,axes=ax)
-tmpfig7.savefig(str(homeDir)+'/AWM4_data/processed/tmp/tmp7.png')
-with mne.viz.use_browser_backend("matplotlib"):
-    tmpfig8 = ica.plot_sources(raw, eog_inds2,stop=120)
-print('ADJUST Y AXIS MANUALLY BEFORE SAVING')
-tmpfig8.savefig(str(homeDir)+'/AWM4_data/processed/tmp/tmp8.png')
-tmpfig9 = ica.plot_overlay(eog_epochs2.average(), exclude=eog_inds2, picks='mag', show=False)
-tmpfig9.savefig(str(homeDir)+'/AWM4_data/processed/tmp/tmp9.png')
-
-for im in range(3):
-    image.append(plt.imread(str(homeDir)+'/AWM4_data/processed/tmp/tmp' +str(im+7)+'.png'))
-    if im == 0:
-        titles.append('EOG2 components')
-    elif im == 1:
-        titles.append('EOG2 sources')
-    else:
-        titles.append('Exclusion result')    
-#sumfig = show_images(image, rows = 1, titles = titles)
-plt.close('all')
-
-sumfig = show_images(image, rows = 3, titles = titles)
-sumfig.savefig(str(homeDir)+'/AWM4_data/processed/ICAs/ICA_Exclusions_VP'+str(actSubj)+'.pdf')
-compfig = ica.plot_components(range(20), title='First 20 Components', colorbar=True)
-compfig.savefig(str(homeDir)+'/AWM4_data/processed/ICAs/ICA_Comps_VP'+str(actSubj)+'.pdf')
-plt.close('all')
-
-#%% Combine all exclusions
-
-all_inds = list(np.unique((ecg_inds + eog_inds1 + eog_inds2)))
-ica.exclude = all_inds # exclude the detected components from the ICA object
-ica.save(str(homeDir)+'/AWM4_data/processed/ICAs/CleanVP'+str(actSubj)+'-ica.fif', overwrite = True) # save the ICA object
-
-# compare original data to cleaned data:
-# ica_raw = raw.copy()
-# ica.apply(ica_raw)
-# raw.plot()
-# ica_raw.plot()
-
-#%%save cleaned epoched data 
-
-ica_trials = CombTrials.copy() 
-ica.apply(ica_trials) #ica_trials is the cleaned epoched data
-ica_trials.save(str(homeDir)+'/AWM4_data/processed/CutEpochs/CutData_VP'+str(actSubj)+'-cleanedICA-epo.fif')
-plt.close('all')
-
-# %%
+print(f"\n=== MANUAL PROBE ARTIFACT REJECTION COMPLETE FOR SUBJECT {actSubj} ===")
+print(f"Excluded components: {sorted(ica.exclude)}")

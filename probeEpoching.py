@@ -29,7 +29,7 @@ os.chdir(HOME_DIR)
 # Load meta information
 metaInfo = pd.read_excel(META_FILE)
 Subs = np.unique(metaInfo.loc[metaInfo.FinalSample==1,'Subject'])
-Subs = Subs[[9, 16, 23]]
+#Subs = Subs[[9, 16, 23]]
 
 locale.setlocale(locale.LC_ALL, "en_US.utf8")
 
@@ -171,3 +171,34 @@ print(f"Probe-locked epochs saved to: {OUTPUT_PATH}")
 #     probe_epochs.plot(n_epochs=10, scalings={'meg': 1e-12})  
 #     #save the dropped version
 #     probe_epochs.save(OUTPUT_PATH + f'ProbeEpochs_VP{subject}-epo-dropped.fif', overwrite=True)
+
+
+for subject in Subs:
+    print(f"\nLoading probe epochs for subject {subject}...")
+    probecorrected_epochs = mne.read_epochs(OUTPUT_PATH + f'ProbeEpochs_VP{subject}-epo-dropped.fif')
+    # check how many epochs are there 
+    print(f"  Number of epochs before dropping: {len(probecorrected_epochs)}")
+    probecorrected_epochs.plot(n_epochs=10, scalings={'meg': 1e-12})  
+    #save the dropped version
+    probecorrected_epochs.save(OUTPUT_PATH + f'ProbeEpochs_VP{subject}-epo-control.fif', overwrite=True)
+    # check how many epochs are there after dropping
+    print(f"  Number of epochs after dropping: {len(probecorrected_epochs)}")
+    # read the epochs again to ensure they are saved correctly
+    probecontrol_epochs = mne.read_epochs(OUTPUT_PATH + f'ProbeEpochs_VP{subject}-epo-control.fif')
+    # how many epochs are there after saving
+    print(f"  Number of epochs after saving: {len(probecontrol_epochs)}")
+
+# Convert Epochs to Evoked objects first
+probe_evoked_list = []
+for subject in Subs:
+    print(f"\nLoading probe epochs for subject {subject}...")
+    probe_epochs = mne.read_epochs(OUTPUT_PATH + f'ProbeEpochs_VP{subject}-epo-dropped.fif')
+    # Average epochs to get Evoked object
+    probe_evoked = probe_epochs.average()
+    probe_evoked_list.append(probe_evoked)
+
+# Now create grand average from Evoked objects
+grand_average = mne.grand_average(probe_evoked_list)
+# Plot the grand average
+grand_average.plot(spatial_colors=True)
+
